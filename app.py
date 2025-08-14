@@ -46,6 +46,10 @@ cached_nonce = get_nonce()
 def check_card(cc_data):
     """Check credit card using the donation gateway"""
     try:
+        # Handle URL encoding - convert %7C back to |
+        import urllib.parse
+        cc_data = urllib.parse.unquote(cc_data)
+        
         # Parse card data
         parts = cc_data.strip().split("|")
         if len(parts) != 4:
