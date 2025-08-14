@@ -156,8 +156,6 @@ def home():
         "service": "🔥 Raja Checker API 🔥",
         "gateway": "Auto Stripe $1 Charge",
         "status": "✅ Online",
-        "usage": "/gateway=autostripe/key=rajachecker/site=needhelped.com/cc=CARD|MM|YY|CVV",
-        "example": "/gateway=autostripe/key=rajachecker/site=needhelped.com/cc=4089117305691428|12|2025|679",
         "made_by": "Raja"
     })
 
