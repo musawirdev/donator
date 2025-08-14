@@ -227,12 +227,6 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                             "directPaymentMethod": {
                                 "paymentMethodIdentifier": payment_method_id,
                                 "sessionId": session_id,
-                                "creditCard": {
-                                    "number": n,
-                                    "expiryMonth": int(mm),
-                                    "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
-                                    "verificationValue": cvc
-                                },
                                 "billingAddress": {
                                     "streetAddress": {
                                         "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
@@ -246,6 +240,12 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                                     }
                                 },
                                 "cardSource": "MANUAL"
+                            },
+                            "creditCard": {
+                                "number": n,
+                                "expiryMonth": int(mm),
+                                "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
+                                "verificationValue": cvc
                             }
                         },
                         "amount": {"value": {"amount": "5.32", "currencyCode": "USD"}}
