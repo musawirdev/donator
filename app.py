@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -152,7 +152,14 @@ def get_bin_info(bin_number):
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return jsonify({
+        "service": "🔥 Raja Checker API 🔥",
+        "gateway": "Auto Stripe $1 Charge",
+        "status": "✅ Online",
+        "usage": "/gateway=autostripe/key=rajachecker/site=needhelped.com/cc=CARD|MM|YY|CVV",
+        "example": "/gateway=autostripe/key=rajachecker/site=needhelped.com/cc=4089117305691428|12|2025|679",
+        "made_by": "Raja"
+    })
 
 @app.route('/gateway=<gateway>/key=<key>/site=<site>/cc=<cc>')
 def check_cc(gateway, key, site, cc):
