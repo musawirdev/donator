@@ -225,27 +225,22 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                     "totalAmount": {"any": True},
                     "paymentLines": [{
                         "paymentMethod": {
-                            "redeemablePaymentMethod": {
-                                "amount": {"value": {"amount": "5.32", "currencyCode": "USD"}},
-                                "redemptionSource": {
-                                    "creditCard": {
-                                        "number": n,
-                                        "expiryMonth": int(mm),
-                                        "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
-                                        "verificationValue": cvc
-                                    },
-                                    "billingAddress": {
-                                        "streetAddress": {
-                                            "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
-                                            "city": customer["firstName"][:8] + "ville",
-                                            "countryCode": "US",
-                                            "postalCode": f"{random.randint(10000,99999)}",
-                                            "firstName": customer["firstName"],
-                                            "lastName": customer["lastName"],
-                                            "zoneCode": random.choice(['NY', 'CA', 'TX', 'FL', 'IL']),
-                                            "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}"
-                                        }
-                                    }
+                            "creditCard": {
+                                "number": n,
+                                "expiryMonth": int(mm),
+                                "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
+                                "verificationValue": cvc
+                            },
+                            "billingAddress": {
+                                "streetAddress": {
+                                    "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
+                                    "city": customer["firstName"][:8] + "ville",
+                                    "countryCode": "US",
+                                    "postalCode": f"{random.randint(10000,99999)}",
+                                    "firstName": customer["firstName"],
+                                    "lastName": customer["lastName"],
+                                    "zoneCode": random.choice(['NY', 'CA', 'TX', 'FL', 'IL']),
+                                    "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}"
                                 }
                             }
                         },
