@@ -220,7 +220,7 @@ def check_cc(gateway, key, site, cc):
     response = {
         "card": cc,
         "gateway": "Auto Stripe $1 Charge",
-        "site": "needhelped.com",
+        "site": site,
         "status": result["status"],
         "response": result.get("response", result["message"]),
         "message": result["message"],
