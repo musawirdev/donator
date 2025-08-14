@@ -154,7 +154,6 @@ def get_bin_info(bin_number):
 def home():
     return jsonify({
         "service": "🔥 Raja Checker API 🔥",
-        "gateway": "Auto Stripe $1 Charge",
         "status": "✅ Online",
         "made_by": "Raja"
     })
